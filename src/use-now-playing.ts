@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 
 import type { Extra, NowPlayingResponse, Track } from "./types.js";
@@ -6,6 +8,12 @@ export type NowPlayingStatus = "loading" | "ready" | "error";
 
 const ACTIVE_POLL_MS = 5_000;
 const IDLE_POLL_MS = 10_000;
+
+function withExtras(endpoint: string, extras: readonly Extra[]) {
+  if (!extras.length) return endpoint;
+  const separator = endpoint.includes("?") ? "&" : "?";
+  return `${endpoint}${separator}extras=${extras.join(",")}`;
+}
 
 export function useNowPlaying({
   endpoint = "/api/now-playing",
@@ -16,52 +24,60 @@ export function useNowPlaying({
 } = {}) {
   const [track, setTrack] = useState<Track | null>(null);
   const [status, setStatus] = useState<NowPlayingStatus>("loading");
-  const url = extras.length
-    ? `${endpoint}?extras=${extras.join(",")}`
-    : endpoint;
+  const url = withExtras(endpoint, extras);
 
   useEffect(() => {
-    let pollTimer: ReturnType<typeof setTimeout> | undefined;
-    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let request: AbortController | undefined;
 
-    function schedulePoll(track: Track | null) {
-      pollTimer = setTimeout(
-        poll,
-        track?.nowPlaying ? ACTIVE_POLL_MS : IDLE_POLL_MS,
-      );
+    function schedule(nowPlaying: boolean) {
+      clearTimeout(timer);
+      if (document.visibilityState === "hidden") return;
+      timer = setTimeout(poll, nowPlaying ? ACTIVE_POLL_MS : IDLE_POLL_MS);
     }
 
     async function poll() {
-      try {
-        const response = await fetch(url, { cache: "no-store" });
-        if (!response.ok) throw new Error("Could not fetch the current track.");
+      // one request at a time, so a response can't overwrite a newer one
+      if (request) return;
+      clearTimeout(timer);
+      const controller = new AbortController();
+      request = controller;
+      let nowPlaying = false;
 
+      try {
+        const response = await fetch(url, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok)
+          throw new Error(`${url} responded ${response.status}`);
         const result = (await response.json()) as NowPlayingResponse;
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
 
         setTrack(result.track);
         setStatus("ready");
-        schedulePoll(result.track);
+        nowPlaying = result.track?.nowPlaying ?? false;
       } catch {
-        if (cancelled) return;
-
+        if (controller.signal.aborted) return;
         setStatus("error");
-        schedulePoll(null);
+      } finally {
+        if (request === controller) request = undefined;
       }
+
+      schedule(nowPlaying);
     }
 
     function onVisibilityChange() {
-      if (document.visibilityState !== "visible") return;
-      if (pollTimer) clearTimeout(pollTimer);
-      void poll();
+      if (document.visibilityState === "hidden") clearTimeout(timer);
+      else void poll();
     }
 
     void poll();
     document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      cancelled = true;
-      if (pollTimer) clearTimeout(pollTimer);
+      clearTimeout(timer);
+      request?.abort();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [url]);
