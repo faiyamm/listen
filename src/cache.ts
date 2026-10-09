@@ -34,3 +34,36 @@ export function createTtlCache<T>({
     },
   };
 }
+
+// shares one pending call per key, then keeps the settled result for ttlMs.
+// the ttl starts when the call settles, so a slow or timed-out call is reused
+// for the whole window instead of expiring the moment it ends
+export function createSharedCalls<T>({
+  ttlMs,
+  now = Date.now,
+  keepFailures,
+}: {
+  ttlMs: number;
+  now?: () => number;
+  keepFailures: boolean;
+}) {
+  const settled = createTtlCache<Promise<T>>({ ttlMs, now });
+  const pending = new Map<string, Promise<T>>();
+
+  return (key: string, call: () => Promise<T>): Promise<T> => {
+    const existing = settled.get(key)?.value ?? pending.get(key);
+    if (existing) return existing;
+
+    const promise = call();
+    pending.set(key, promise);
+    promise
+      .then(
+        () => settled.set(key, promise),
+        () => {
+          if (keepFailures) settled.set(key, promise);
+        },
+      )
+      .finally(() => pending.delete(key));
+    return promise;
+  };
+}

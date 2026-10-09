@@ -47,7 +47,7 @@ function fakeFetcher({
   itunesDurationMs,
   itunesResults,
 }: FakeApis = {}) {
-  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  return vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
 
     if (url.hostname === "itunes.apple.com") {
@@ -218,7 +218,7 @@ describe("createNowPlayingEngine", () => {
   it("adds iTunes extras only when they are requested", async () => {
     const fetcher = fakeFetcher();
 
-    const track = await engineWith(fetcher).getTrack(["itunes"]);
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
 
     expect(track?.itunes).toEqual({
       appleMusicUrl: "https://music.apple.com/us/album/bbw/1",
@@ -241,7 +241,7 @@ describe("createNowPlayingEngine", () => {
       ],
     });
 
-    const track = await engineWith(fetcher).getTrack(["itunes"]);
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
 
     expect(track?.itunes?.appleMusicUrl).toBe(
       "https://music.apple.com/us/album/bbw/1",
@@ -253,7 +253,7 @@ describe("createNowPlayingEngine", () => {
       itunesResults: [{ ...DRAKE_RESULT, artistName: "Someone Else" }],
     });
 
-    const track = await engineWith(fetcher).getTrack(["itunes"]);
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
 
     expect(track?.itunes).toEqual({
       appleMusicUrl: null,
@@ -262,13 +262,54 @@ describe("createNowPlayingEngine", () => {
     });
   });
 
+  it("doesn't match an artist whose name only contains the one on Last.fm", async () => {
+    const fetcher = fakeFetcher({
+      itunesResults: [{ ...DRAKE_RESULT, artistName: "Drake Bell" }],
+    });
+
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
+
+    expect(track?.itunes?.appleMusicUrl).toBeNull();
+  });
+
+  it("matches a featured artist and a title with a version suffix", async () => {
+    const fetcher = fakeFetcher({
+      itunesResults: [
+        {
+          ...DRAKE_RESULT,
+          artistName: "Future & Drake",
+          trackName: "BBW (Remastered 2011)",
+        },
+      ],
+    });
+
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
+
+    expect(track?.itunes?.appleMusicUrl).toBe(
+      "https://music.apple.com/us/album/bbw/1",
+    );
+  });
+
+  it("never takes another song by the same artist", async () => {
+    const fetcher = fakeFetcher({
+      itunesDurationMs: 999_000,
+      itunesResults: [{ ...DRAKE_RESULT, trackName: "Hotline Bling" }],
+      lastfmDuration: "0",
+    });
+
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
+
+    expect(track?.itunes?.appleMusicUrl).toBeNull();
+    expect(track?.durationMs).toBeNull();
+  });
+
   it("falls back to the iTunes duration when Last.fm has none", async () => {
     const fetcher = fakeFetcher({
       itunesDurationMs: 180_000,
       lastfmDuration: "0",
     });
 
-    const track = await engineWith(fetcher).getTrack(["itunes"]);
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
 
     expect(track?.durationMs).toBe(180_000);
   });
@@ -316,14 +357,47 @@ describe("createNowPlayingEngine", () => {
     expect(calls(fetcher, "user.getrecenttracks")).toBe(2);
   });
 
+  it("shares the Last.fm call between requests with different extras", async () => {
+    const fetcher = fakeFetcher();
+    const engine = engineWith(fetcher);
+
+    await Promise.all([
+      engine.getTrack(),
+      engine.getTrack({ extras: ["itunes"] }),
+    ]);
+
+    expect(calls(fetcher, "user.getrecenttracks")).toBe(1);
+    expect(calls(fetcher, "track.getInfo")).toBe(1);
+  });
+
+  it("reuses a timed-out Last.fm call for five seconds after it gives up", async () => {
+    let now = 0;
+    const fetcher = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            now += 5_000;
+            reject(init.signal?.reason);
+          });
+        }),
+    );
+    const engine = engineWith(fetcher, () => now, 20);
+
+    await expect(engine.getTrack()).rejects.toThrow();
+    now += 4_000;
+    await expect(engine.getTrack()).rejects.toThrow();
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("looks up duration and iTunes once per song", async () => {
     const fetcher = fakeFetcher();
     let now = 0;
     const engine = engineWith(fetcher, () => now);
 
-    await engine.getTrack(["itunes"]);
+    await engine.getTrack({ extras: ["itunes"] });
     now = 10_000;
-    await engine.getTrack(["itunes"]);
+    await engine.getTrack({ extras: ["itunes"] });
 
     expect(calls(fetcher, "user.getrecenttracks")).toBe(2);
     expect(calls(fetcher, "track.getInfo")).toBe(1);
@@ -351,9 +425,9 @@ describe("createNowPlayingEngine", () => {
     let now = 0;
     const engine = engineWith(fetcher, () => now);
 
-    const first = await engine.getTrack(["itunes"]);
+    const first = await engine.getTrack({ extras: ["itunes"] });
     now = 10_000;
-    await engine.getTrack(["itunes"]);
+    await engine.getTrack({ extras: ["itunes"] });
 
     expect(first?.durationMs).toBeNull();
     expect(first?.itunes?.previewUrl).toBeNull();
