@@ -3,7 +3,7 @@
 Show what you're listening to on Last.fm, with any design. listen fetches your latest track on the server, works out whether it is still playing, and hands your UI one clean JSON shape. It draws nothing, so the look is yours.
 
 ```bash
-pnpm add @actkool/listen
+npm install @actkool/listen
 ```
 
 ## Before you start: your scrobbler
@@ -30,21 +30,27 @@ const engine = createNowPlayingEngine({
 
 export async function GET(request: Request) {
   const extras = parseExtras(new URL(request.url).searchParams.get("extras"));
-  return Response.json({ track: await engine.getTrack(extras) });
+  try {
+    return Response.json({ track: await engine.getTrack(extras) });
+  } catch {
+    return Response.json({ error: "upstream" }, { status: 502 });
+  }
 }
 ```
 
-Create the engine once, outside the handler, so its caches survive between requests. Responses are cached for five seconds, and song lookups for a day, so polling stays cheap. Failed lookups are not cached and get retried.
+Create the engine once, outside the handler, so its caches survive between requests. Responses are cached for five seconds, and requests that arrive together share one call to Last.fm. Song lookups are cached for a day, so polling stays cheap.
+
+`getTrack()` throws when Last.fm can't be reached, answers with an error, or takes longer than five seconds (pass `timeoutMs` to `createNowPlayingEngine` to change that). Answer with an error status, as above, so your UI can tell "Last.fm is down" apart from "nothing scrobbled yet". A failure is reused for the same five seconds, so a Last.fm outage doesn't turn every poll into a new request.
 
 It runs anywhere with `fetch`: Node 20 or newer, Cloudflare Workers, Bun, Deno.
 
 ### Response
 
-`getTrack()` returns a track, or `null` when the account has nothing scrobbled or Last.fm can't be reached:
+`getTrack()` returns a track, or `null` when the account has nothing scrobbled:
 
 ```json
 {
-  "id": "Artist\u0000Track",
+  "id": "Artist/Track",
   "name": "Track",
   "artist": "Artist",
   "albumArtUrl": "https://lastfm.freetls.fastly.net/i/u/300x300/artwork.jpg",
@@ -55,14 +61,15 @@ It runs anywhere with `fetch`: Node 20 or newer, Cloudflare Workers, Bun, Deno.
 }
 ```
 
+- `id` is the artist and the title, each URL-encoded, so it is safe as a React key, a DOM id, or part of a URL.
 - `nowPlaying` is already resolved. It is true while Last.fm reports the track as playing, or while a scrobbled track is still within its length, which covers the gap before some scrobblers catch up.
-- `scrobbledAt` is when the track was scrobbled, in milliseconds, so you can show "played 3 h ago". It is `null` while the track is playing.
+- `scrobbledAt` is when the track started, in milliseconds, so you can show "played 3h ago". It is `null` while Last.fm reports the track as playing; when `nowPlaying` comes from the track length instead, it keeps its value.
 - `durationMs` is `null` when no source knows the length.
-- `albumArtUrl` is often `null`: Last.fm is missing artwork for many songs. The iTunes extra below fills that gap.
+- `albumArtUrl` is often `null`: Last.fm is missing artwork for many songs, and its grey placeholder star is left out. The iTunes extra below fills that gap.
 
 ### iTunes extra
 
-Pass `["itunes"]` to also match the song on the iTunes Search API. It adds higher-resolution artwork, a 30-second preview, and an Apple Music link. Any field can be `null` when iTunes has no match:
+Pass `["itunes"]` to also match the song on the iTunes Search API. It adds higher-resolution artwork, a 30-second preview, and an Apple Music link. Only a result by the same artist counts, so a cover or a karaoke version is never used. Any field can be `null` when iTunes has no match:
 
 ```json
 {
@@ -79,7 +86,7 @@ It is opt-in, so a design that only needs the title and artist never waits on iT
 
 ## React
 
-`useNowPlaying` polls your route and renders nothing. It checks every five seconds while a song is playing, every ten seconds otherwise, and right away when the tab comes back into view.
+`useNowPlaying` polls your route and renders nothing. It checks every five seconds while a song is playing and every ten seconds otherwise. It stops while the tab is hidden and checks right away when it comes back.
 
 ```tsx
 import { useNowPlaying } from "@actkool/listen/react";
@@ -97,7 +104,9 @@ function NowPlaying() {
 }
 ```
 
-`status` is `"loading"`, `"ready"`, or `"error"`. Pass `endpoint` if your route is not `/api/now-playing`.
+`status` is `"loading"`, `"ready"`, or `"error"`. On an error, `track` keeps the last song it got, so you can keep showing it and fall back to an error message only when there is nothing to show. Pass `endpoint` if your route is not `/api/now-playing`.
+
+The hook is a client module, so in the Next.js App Router use it from a component marked `"use client"`.
 
 Not using React? Poll your route with `fetch`; the response is the same JSON.
 
