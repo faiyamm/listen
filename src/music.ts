@@ -6,6 +6,7 @@ import { lastfmTrackUrl } from "./urls.js";
 
 const RESPONSE_TTL_MS = 5_000;
 const LOOKUP_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 5_000;
 
 export type NowPlayingEngine = {
   getTrack(extras?: readonly Extra[]): Promise<Track | null>;
@@ -17,8 +18,12 @@ export function parseExtras(value: string | null): Extra[] {
   return EXTRAS.filter((extra) => requested.has(extra));
 }
 
-function trackKey(artist: string, name: string) {
+function lookupKey(artist: string, name: string) {
   return `${artist}\u0000${name}`;
+}
+
+function trackId(artist: string, name: string) {
+  return `${encodeURIComponent(artist)}/${encodeURIComponent(name)}`;
 }
 
 function isWithinPlayback(
@@ -38,13 +43,18 @@ export function createNowPlayingEngine({
   username,
   fetcher = fetch,
   now = Date.now,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
 }: {
   apiKey: string;
   username: string;
   fetcher?: typeof fetch;
   now?: () => number;
+  timeoutMs?: number;
 }): NowPlayingEngine {
-  const responses = createTtlCache<Track | null>({
+  const request = { apiKey, fetcher, timeoutMs };
+  // holds the pending promise too, so requests that arrive together share one
+  // call to last.fm, and a failure is reused instead of retried by every poll
+  const responses = createTtlCache<Promise<Track | null>>({
     ttlMs: RESPONSE_TTL_MS,
     now,
   });
@@ -58,16 +68,15 @@ export function createNowPlayingEngine({
   });
 
   async function getDurationMs(artist: string, name: string) {
-    const key = trackKey(artist, name);
+    const key = lookupKey(artist, name);
     const cached = durations.get(key);
     if (cached) return cached.value;
 
     try {
       const durationMs = await fetchLastfmDurationMs({
-        apiKey,
+        ...request,
         artist,
         name,
-        fetcher,
       });
       durations.set(key, durationMs);
       return durationMs;
@@ -77,17 +86,17 @@ export function createNowPlayingEngine({
   }
 
   async function getItunesMatch(artist: string, name: string) {
-    const key = trackKey(artist, name);
+    const key = lookupKey(artist, name);
     const cached = itunesMatches.get(key);
     if (cached) return cached.value;
 
-    const match = await findItunesMatch({ artist, name }, fetcher);
+    const match = await findItunesMatch({ artist, name }, request);
     if (match) itunesMatches.set(key, match);
     return match;
   }
 
   async function resolveTrack(extras: readonly Extra[]): Promise<Track | null> {
-    const lastfm = await fetchLastfmTrack({ apiKey, username, fetcher });
+    const lastfm = await fetchLastfmTrack({ ...request, username });
     if (!lastfm) return null;
 
     const wantsItunes = extras.includes("itunes");
@@ -98,7 +107,7 @@ export function createNowPlayingEngine({
     const durationMs = lastfmDurationMs ?? itunes?.durationMs ?? null;
 
     return {
-      id: trackKey(lastfm.artist, lastfm.name),
+      id: trackId(lastfm.artist, lastfm.name),
       ...lastfm,
       lastfmUrl: lastfmTrackUrl(lastfm.artist, lastfm.name),
       durationMs,
@@ -116,12 +125,12 @@ export function createNowPlayingEngine({
   }
 
   return {
-    async getTrack(extras = []) {
+    getTrack(extras = []) {
       const key = [...extras].sort().join(",");
       const cached = responses.get(key);
       if (cached) return cached.value;
 
-      const track = await resolveTrack(extras);
+      const track = resolveTrack(extras);
       responses.set(key, track);
       return track;
     },
