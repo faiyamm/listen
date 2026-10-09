@@ -1,7 +1,9 @@
 import type { LastfmTrack } from "./types.js";
 import { isAllowedArtworkUrl } from "./urls.js";
 
-type LastfmResponse = {
+type LastfmError = { error?: number; message?: string };
+
+type LastfmResponse = LastfmError & {
   recenttracks?: {
     track?: Array<{
       name?: string;
@@ -14,82 +16,102 @@ type LastfmResponse = {
 };
 
 const LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/";
+const LASTFM_NOT_FOUND = 6;
+// last.fm serves this grey star instead of an empty image when a track has no art
+const PLACEHOLDER_ARTWORK = "2a96cbd8b46e442fc41c2b86b821562f";
+
+type Request = {
+  apiKey: string;
+  fetcher: typeof fetch;
+  timeoutMs: number;
+};
+
+async function callLastfm<T>(
+  { apiKey, fetcher, timeoutMs }: Request,
+  params: Record<string, string>,
+): Promise<{ ok: boolean; status: number; data: (T & LastfmError) | null }> {
+  const url = new URL(LASTFM_API_URL);
+  url.search = new URLSearchParams({
+    ...params,
+    api_key: apiKey,
+    format: "json",
+  }).toString();
+
+  const response = await fetcher(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const data = (await response.json().catch(() => null)) as
+    (T & LastfmError) | null;
+  return { ok: response.ok, status: response.status, data };
+}
+
+function lastfmFailure(
+  method: string,
+  status: number,
+  data: LastfmError | null,
+) {
+  const detail = data?.error ? ` (error ${data.error}: ${data.message})` : "";
+  return new Error(`Last.fm ${method} failed with ${status}${detail}`);
+}
 
 // throws on transport errors so callers can tell "last.fm has no duration"
 // (cacheable) apart from "the request failed" (worth retrying)
 export async function fetchLastfmDurationMs({
-  apiKey,
   artist,
   name,
-  fetcher = fetch,
-}: {
-  apiKey: string;
-  artist: string;
-  name: string;
-  fetcher?: typeof fetch;
-}): Promise<number | null> {
-  const url = new URL(LASTFM_API_URL);
-  url.search = new URLSearchParams({
+  ...request
+}: Request & { artist: string; name: string }): Promise<number | null> {
+  const { ok, status, data } = await callLastfm<{
+    track?: { duration?: string };
+  }>(request, {
     method: "track.getInfo",
     artist,
     track: name,
-    api_key: apiKey,
-    format: "json",
     autocorrect: "1",
-  }).toString();
+  });
 
-  const response = await fetcher(url);
-  if (!response.ok) {
-    throw new Error(`Last.fm track.getInfo failed with ${response.status}`);
+  if (data?.error === LASTFM_NOT_FOUND) return null;
+  if (!ok || !data || data.error) {
+    throw lastfmFailure("track.getInfo", status, data);
   }
 
-  const data = (await response.json()) as { track?: { duration?: string } };
   const durationMs = Number.parseInt(data.track?.duration ?? "", 10);
   return durationMs > 0 ? durationMs : null;
 }
 
+// null means the account has nothing scrobbled; a failed request throws
 export async function fetchLastfmTrack({
-  apiKey,
   username,
-  fetcher = fetch,
-}: {
-  apiKey: string;
-  username: string;
-  fetcher?: typeof fetch;
-}): Promise<LastfmTrack | null> {
-  const url = new URL(LASTFM_API_URL);
-  url.search = new URLSearchParams({
+  ...request
+}: Request & { username: string }): Promise<LastfmTrack | null> {
+  const { ok, status, data } = await callLastfm<LastfmResponse>(request, {
     method: "user.getrecenttracks",
     user: username,
-    api_key: apiKey,
-    format: "json",
     limit: "1",
-  }).toString();
+  });
 
-  try {
-    const response = await fetcher(url);
-    if (!response.ok) return null;
-    const data = (await response.json()) as LastfmResponse;
-    const track = data.recenttracks?.track?.[0];
-    const name = track?.name?.trim();
-    const artist = track?.artist?.["#text"]?.trim();
-    if (!track || !name || !artist) return null;
-
-    const image = [...(track.image ?? [])]
-      .reverse()
-      .map((item) => item["#text"] ?? "")
-      .find(isAllowedArtworkUrl);
-
-    return {
-      name,
-      artist,
-      albumArtUrl: image ?? null,
-      nowPlaying: track?.["@attr"]?.nowplaying === "true",
-      scrobbledAt: track?.date?.uts
-        ? Number.parseInt(track?.date.uts, 10) * 1000
-        : null,
-    };
-  } catch {
-    return null;
+  if (!ok || !data?.recenttracks || data.error) {
+    throw lastfmFailure("user.getrecenttracks", status, data);
   }
+
+  const track = data.recenttracks.track?.[0];
+  const name = track?.name?.trim();
+  const artist = track?.artist?.["#text"]?.trim();
+  if (!track || !name || !artist) return null;
+
+  const image = [...(track.image ?? [])]
+    .reverse()
+    .map((item) => item["#text"] ?? "")
+    .find(
+      (url) => isAllowedArtworkUrl(url) && !url.includes(PLACEHOLDER_ARTWORK),
+    );
+  const uts = Number.parseInt(track.date?.uts ?? "", 10);
+
+  return {
+    name,
+    artist,
+    albumArtUrl: image ?? null,
+    nowPlaying: track["@attr"]?.nowplaying === "true",
+    scrobbledAt: uts > 0 ? uts * 1000 : null,
+  };
 }
