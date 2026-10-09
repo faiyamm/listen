@@ -31,18 +31,20 @@ const engine = createNowPlayingEngine({
 export async function GET(request: Request) {
   const extras = parseExtras(new URL(request.url).searchParams.get("extras"));
   try {
-    return Response.json({ track: await engine.getTrack(extras) });
+    return Response.json({ track: await engine.getTrack({ extras }) });
   } catch {
     return Response.json({ error: "upstream" }, { status: 502 });
   }
 }
 ```
 
-Create the engine once, outside the handler, so its caches survive between requests. Responses are cached for five seconds, and requests that arrive together share one call to Last.fm. Song lookups are cached for a day, so polling stays cheap.
+Create the engine once, outside the handler, so its caches survive between requests. Your latest track is cached for five seconds, counted from when Last.fm answers, and requests that arrive together share one call to Last.fm. Song lookups are cached for a day, so polling stays cheap.
 
-`getTrack()` throws when Last.fm can't be reached, answers with an error, or takes longer than five seconds (pass `timeoutMs` to `createNowPlayingEngine` to change that). Answer with an error status, as above, so your UI can tell "Last.fm is down" apart from "nothing scrobbled yet". A failure is reused for the same five seconds, so a Last.fm outage doesn't turn every poll into a new request.
+`getTrack()` throws when Last.fm can't be reached, answers with an error, or doesn't answer within five seconds. Answer with an error status, as above, so your UI can tell "Last.fm is down" apart from "nothing scrobbled yet". A failure is reused for the same five seconds, so a Last.fm outage doesn't turn every poll into a new request.
 
-It runs anywhere with `fetch`: Node 20 or newer, Cloudflare Workers, Bun, Deno.
+The song length and the iTunes extra are looked up after that, each with its own five seconds. If one of them fails or runs out of time, its fields are `null` and the track still comes back, so a call can take up to about ten seconds. Pass `timeoutMs` to `createNowPlayingEngine` to change the limit for every request.
+
+It runs anywhere with `fetch`: Node 20.19 or newer, Cloudflare Workers, Bun, Deno. The package is ESM; on Node, `require()` works from 20.19 and 22.12.
 
 ### Response
 
@@ -61,7 +63,7 @@ It runs anywhere with `fetch`: Node 20 or newer, Cloudflare Workers, Bun, Deno.
 }
 ```
 
-- `id` is the artist and the title, each URL-encoded, so it is safe as a React key, a DOM id, or part of a URL.
+- `id` is the artist and the title, each URL-encoded and joined by `/`, so it is safe as a React key or a DOM id. Pass it through `CSS.escape()` before using it in a selector.
 - `nowPlaying` is already resolved. It is true while Last.fm reports the track as playing, or while a scrobbled track is still within its length, which covers the gap before some scrobblers catch up.
 - `scrobbledAt` is when the track started, in milliseconds, so you can show "played 3h ago". It is `null` while Last.fm reports the track as playing; when `nowPlaying` comes from the track length instead, it keeps its value.
 - `durationMs` is `null` when no source knows the length.
@@ -69,7 +71,7 @@ It runs anywhere with `fetch`: Node 20 or newer, Cloudflare Workers, Bun, Deno.
 
 ### iTunes extra
 
-Pass `["itunes"]` to also match the song on the iTunes Search API. It adds higher-resolution artwork, a 30-second preview, and an Apple Music link. Only a result by the same artist counts, so a cover or a karaoke version is never used. Any field can be `null` when iTunes has no match:
+Pass `["itunes"]` to also match the song on the iTunes Search API. It adds higher-resolution artwork, a 30-second preview, and an Apple Music link. Only a result by the same artist (or one of the credited artists) with the same title counts, ignoring suffixes like "(Live)" or "- Remastered", so a cover, a karaoke version or another song by the artist is never used. Any field can be `null` when iTunes has no match:
 
 ```json
 {

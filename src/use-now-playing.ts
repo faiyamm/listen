@@ -22,9 +22,13 @@ export function useNowPlaying({
   endpoint?: string;
   extras?: readonly Extra[];
 } = {}) {
-  const [track, setTrack] = useState<Track | null>(null);
-  const [status, setStatus] = useState<NowPlayingStatus>("loading");
   const url = withExtras(endpoint, extras);
+  // tagged with its url, so switching endpoints never shows the old track
+  const [state, setState] = useState<{
+    url: string;
+    status: NowPlayingStatus;
+    track: Track | null;
+  }>({ url, status: "loading", track: null });
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -54,12 +58,16 @@ export function useNowPlaying({
         const result = (await response.json()) as NowPlayingResponse;
         if (controller.signal.aborted) return;
 
-        setTrack(result.track);
-        setStatus("ready");
-        nowPlaying = result.track?.nowPlaying ?? false;
+        const track = result.track ?? null;
+        setState({ url, status: "ready", track });
+        nowPlaying = track?.nowPlaying ?? false;
       } catch {
         if (controller.signal.aborted) return;
-        setStatus("error");
+        setState((previous) => ({
+          url,
+          status: "error",
+          track: previous.url === url ? previous.track : null,
+        }));
       } finally {
         if (request === controller) request = undefined;
       }
@@ -82,5 +90,7 @@ export function useNowPlaying({
     };
   }, [url]);
 
-  return { status, track };
+  return state.url === url
+    ? { status: state.status, track: state.track }
+    : { status: "loading" as const, track: null };
 }

@@ -16,6 +16,8 @@
   ],
   "type": "module",
   "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -27,12 +29,20 @@
     },
     "./package.json": "./package.json"
   },
+  "typesVersions": {
+    "*": {
+      "react": [
+        "./dist/react.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
+    "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -46,18 +56,22 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^30.1.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.1",
     "vitest": "^4.1.11"
   },
   "publishConfig": {
     "access": "public"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   }
 }

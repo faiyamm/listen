@@ -124,6 +124,40 @@ describe("useNowPlaying", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("never shows the previous endpoint's track after switching", async () => {
+    const { result, rerender } = renderHook(
+      ({ endpoint }) => useNowPlaying({ endpoint }),
+      { initialProps: { endpoint: "/api/a" } },
+    );
+    await flush();
+    expect(result.current.track).toEqual(TRACK);
+
+    fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+    rerender({ endpoint: "/api/b" });
+
+    expect(result.current).toEqual({ status: "loading", track: null });
+  });
+
+  it("treats an answer without a track as no track", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(Response.json({ error: "something" })),
+    );
+    const { result } = renderHook(() => useNowPlaying());
+    await flush();
+
+    expect(result.current).toEqual({ status: "ready", track: null });
+  });
+
+  it("reports an error when the request itself fails", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.reject(new TypeError("offline")),
+    );
+    const { result } = renderHook(() => useNowPlaying());
+    await flush();
+
+    expect(result.current).toEqual({ status: "error", track: null });
+  });
+
   it("cancels the request in flight when it unmounts", async () => {
     let signal: AbortSignal | undefined;
     fetchMock.mockImplementationOnce((_url: string, init: RequestInit) => {
