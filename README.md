@@ -1,6 +1,6 @@
 # @actkool/listen
 
-Show what you're listening to on Last.fm, with any design. listen fetches your latest track on the server, works out whether it is still playing, and hands your UI one clean JSON shape. It draws nothing, so the look is yours.
+Show what you're listening to on Last.fm, with any design. `listen` fetches your latest track on the server, works out whether it is still playing, and hands your UI one clean JSON shape. It draws nothing, so the look is yours.
 
 ```bash
 npm install @actkool/listen
@@ -8,12 +8,12 @@ npm install @actkool/listen
 
 ## Before you start: your scrobbler
 
-listen can only be as live as Last.fm. Last.fm knows what you're playing when your player sends it a "now playing" update, and not every scrobbler does that right away.
+`listen` can only be as live as Last.fm. Last.fm knows what you're playing when your player sends it a "now playing" update, and not every scrobbler does that right away.
 
 - **Spotify** sends it on its own once you connect your account to Last.fm.
 - **Apple Music** needs a separate scrobbler. [FastScrobbler](https://github.com/kevinlim512/FastScrobbler) is open source and sends "now playing" as soon as a song starts. On Mac it is reliable. On iPhone it works best-effort, because iOS can suspend apps in the background.
 
-Without a scrobbler like these, listen still works, but it shows the last song you played instead of the current one.
+Without a scrobbler like these, `listen` still works, but it shows the last song you played instead of the current one.
 
 ## Server
 
