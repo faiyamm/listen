@@ -303,6 +303,92 @@ describe("createNowPlayingEngine", () => {
     expect(track?.durationMs).toBeNull();
   });
 
+  it.each([
+    [
+      "the lead of a featuring credit",
+      "Drake featuring Future",
+      "BBW",
+      "Drake",
+      "BBW",
+    ],
+    ["a credited artist", "Drake", "BBW", "Future & Drake", "BBW"],
+    [
+      "a band with a comma",
+      "Tyler, The Creator",
+      "BBW",
+      "Tyler, The Creator",
+      "BBW",
+    ],
+    ["a version suffix", "Drake", "BBW - Remastered 2011", "Drake", "BBW"],
+    ["a live take", "Drake", "BBW (Live)", "Drake", "BBW"],
+  ])("matches %s", async (_case, artist, name, itunesArtist, itunesName) => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.hostname === "itunes.apple.com") {
+        return Response.json({
+          results: [
+            {
+              ...DRAKE_RESULT,
+              artistName: itunesArtist,
+              trackName: itunesName,
+            },
+          ],
+        });
+      }
+      if (url.searchParams.get("method") === "track.getInfo") {
+        return Response.json({ track: { duration: "0" } });
+      }
+      return Response.json({
+        recenttracks: { track: [{ artist: { "#text": artist }, name }] },
+      });
+    });
+
+    const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
+
+    expect(track?.itunes?.appleMusicUrl).toBe(DRAKE_RESULT.trackViewUrl);
+  });
+
+  it.each([
+    ["a reprise", "Drake", "BBW", "Drake", "BBW (Reprise)"],
+    ["another part", "Drake", "BBW - Pt. 2", "Drake", "BBW (Part 1)"],
+    ["one word of a band name", "Earth, Wind & Fire", "BBW", "Earth", "BBW"],
+    [
+      "a title that starts with feat",
+      "Drake",
+      "Feat of Clay",
+      "Drake",
+      "Intro",
+    ],
+  ])(
+    "doesn't take %s",
+    async (_case, artist, name, itunesArtist, itunesName) => {
+      const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.hostname === "itunes.apple.com") {
+          return Response.json({
+            results: [
+              {
+                ...DRAKE_RESULT,
+                artistName: itunesArtist,
+                trackName: itunesName,
+              },
+            ],
+          });
+        }
+        if (url.searchParams.get("method") === "track.getInfo") {
+          return Response.json({ track: { duration: "0" } });
+        }
+        return Response.json({
+          recenttracks: { track: [{ artist: { "#text": artist }, name }] },
+        });
+      });
+
+      const track = await engineWith(fetcher).getTrack({ extras: ["itunes"] });
+
+      expect(track?.itunes?.appleMusicUrl).toBeNull();
+    },
+  );
+
   it("falls back to the iTunes duration when Last.fm has none", async () => {
     const fetcher = fakeFetcher({
       itunesDurationMs: 180_000,
@@ -420,20 +506,32 @@ describe("createNowPlayingEngine", () => {
     expect(calls(fetcher, "track.getInfo")).toBe(1);
   });
 
-  it("retries lookups that failed instead of caching the failure", async () => {
+  it("waits a minute before retrying a lookup that failed", async () => {
     const fetcher = fakeFetcher({ durationStatus: 503, itunesStatus: 503 });
     let now = 0;
     const engine = engineWith(fetcher, () => now);
 
     const first = await engine.getTrack({ extras: ["itunes"] });
-    now = 10_000;
+    now = 30_000;
     await engine.getTrack({ extras: ["itunes"] });
+    expect(calls(fetcher, "track.getInfo")).toBe(1);
+    expect(calls(fetcher, "itunes.apple.com")).toBe(1);
 
+    now = 70_000;
+    await engine.getTrack({ extras: ["itunes"] });
     expect(first?.durationMs).toBeNull();
     expect(first?.itunes?.previewUrl).toBeNull();
     expect(calls(fetcher, "track.getInfo")).toBe(2);
     expect(calls(fetcher, "itunes.apple.com")).toBe(2);
   });
+
+  it("gives up on a fetcher that ignores its abort signal", async () => {
+    const fetcher = vi.fn(() => new Promise<Response>(() => {}));
+
+    await expect(engineWith(fetcher, Date.now, 20).getTrack()).rejects.toThrow(
+      "gave up",
+    );
+  }, 3_000);
 });
 
 describe("parseExtras", () => {

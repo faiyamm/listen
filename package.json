@@ -8,6 +8,10 @@
     "url": "git+https://github.com/faiyamm/listen.git",
     "directory": "packages/listen"
   },
+  "homepage": "https://github.com/faiyamm/listen/tree/main/packages/listen#readme",
+  "bugs": {
+    "url": "https://github.com/faiyamm/listen/issues"
+  },
   "keywords": [
     "lastfm",
     "now-playing",
