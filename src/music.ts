@@ -12,7 +12,11 @@ import { lastfmTrackUrl } from "./urls.js";
 
 const RESPONSE_TTL_MS = 5_000;
 const LOOKUP_TTL_MS = 24 * 60 * 60 * 1000;
+const LOOKUP_FAILURE_TTL_MS = 60_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
+// a call gives up a little after its own request timeout, in case a custom
+// fetcher ignores the abort signal
+const DEADLINE_MARGIN_MS = 1_000;
 
 export type GetTrackOptions = {
   extras?: readonly Extra[];
@@ -62,21 +66,26 @@ export function createNowPlayingEngine({
   timeoutMs?: number;
 }): NowPlayingEngine {
   const request = { apiKey, fetcher, timeoutMs };
-  // a failure is kept too, so a last.fm outage isn't retried by every poll
+  const deadlineMs = timeoutMs + DEADLINE_MARGIN_MS;
+  // failures are kept too, so an outage or a rate limit isn't hit again by
+  // every poll from every visitor
   const recentTracks = createSharedCalls<LastfmTrack | null>({
     ttlMs: RESPONSE_TTL_MS,
+    failureTtlMs: RESPONSE_TTL_MS,
+    deadlineMs,
     now,
-    keepFailures: true,
   });
   const durations = createSharedCalls<number | null>({
     ttlMs: LOOKUP_TTL_MS,
+    failureTtlMs: LOOKUP_FAILURE_TTL_MS,
+    deadlineMs,
     now,
-    keepFailures: false,
   });
   const itunesMatches = createSharedCalls<ItunesMatch>({
     ttlMs: LOOKUP_TTL_MS,
+    failureTtlMs: LOOKUP_FAILURE_TTL_MS,
+    deadlineMs,
     now,
-    keepFailures: false,
   });
 
   function getDurationMs(artist: string, name: string) {
