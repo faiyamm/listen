@@ -400,6 +400,19 @@ describe("createNowPlayingEngine", () => {
     expect(track?.durationMs).toBe(180_000);
   });
 
+  it("ignores an iTunes duration that isn't a positive number", async () => {
+    const zero = fakeFetcher({ itunesDurationMs: 0, lastfmDuration: "0" });
+    const negative = fakeFetcher({ itunesDurationMs: -5, lastfmDuration: "0" });
+
+    const fromZero = await engineWith(zero).getTrack({ extras: ["itunes"] });
+    const fromNegative = await engineWith(negative).getTrack({
+      extras: ["itunes"],
+    });
+
+    expect(fromZero?.durationMs).toBeNull();
+    expect(fromNegative?.durationMs).toBeNull();
+  });
+
   it("serves repeat requests from the response cache for five seconds", async () => {
     const fetcher = fakeFetcher();
     let now = 0;
@@ -532,6 +545,31 @@ describe("createNowPlayingEngine", () => {
       "gave up",
     );
   }, 3_000);
+
+  it("treats a track whose fields aren't strings as no track", async () => {
+    const fetcher = fakeFetcher({
+      recentBody: {
+        recenttracks: {
+          track: [{ artist: { "#text": "Drake" }, image: [null], name: 123 }],
+        },
+      },
+    });
+
+    await expect(engineWith(fetcher).getTrack()).resolves.toBeNull();
+  });
+
+  it("rejects options it can't work with when the engine is created", () => {
+    const fetcher = fakeFetcher();
+
+    expect(() => engineWith(fetcher, () => 0, -1)).toThrow("timeoutMs");
+    expect(() => engineWith(fetcher, () => 0, Number.NaN)).toThrow("timeoutMs");
+    expect(() =>
+      createNowPlayingEngine({ apiKey: " ", username: "listener" }),
+    ).toThrow("apiKey");
+    expect(() =>
+      createNowPlayingEngine({ apiKey: "test-key", username: "" }),
+    ).toThrow("username");
+  });
 });
 
 describe("parseExtras", () => {
