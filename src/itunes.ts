@@ -30,6 +30,12 @@ const FEATURED = /\s+(?:featuring|feat\.?|ft\.?)\s.*$/i;
 const VERSION_WORDS =
   /\b(?:remaster(?:ed)?|live|radio edit|edit|mono|stereo|version|deluxe|explicit|clean|single|acoustic|bonus track|feat\.?|ft\.?|featuring|with)\b/i;
 
+function positiveMs(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
 function normalize(value: string) {
   const letters = value
     .normalize("NFD")
@@ -134,9 +140,6 @@ export async function findItunesMatch(
       result.trackViewUrl && isAllowedAppleMusicUrl(result.trackViewUrl)
         ? result.trackViewUrl
         : null,
-    durationMs:
-      typeof result.trackTimeMillis === "number"
-        ? result.trackTimeMillis
-        : null,
+    durationMs: positiveMs(result.trackTimeMillis),
   };
 }

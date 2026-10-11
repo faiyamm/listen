@@ -26,6 +26,11 @@ type Request = {
   timeoutMs: number;
 };
 
+// the api is typed, but a field that isn't a string must not throw
+function asText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 async function callLastfm<T>(
   { apiKey, fetcher, timeoutMs }: Request,
   params: Record<string, string>,
@@ -95,13 +100,13 @@ export async function fetchLastfmTrack({
   }
 
   const track = data.recenttracks.track?.[0];
-  const name = track?.name?.trim();
-  const artist = track?.artist?.["#text"]?.trim();
+  const name = asText(track?.name);
+  const artist = asText(track?.artist?.["#text"]);
   if (!track || !name || !artist) return null;
 
   const image = [...(track.image ?? [])]
     .reverse()
-    .map((item) => item["#text"] ?? "")
+    .map((item) => asText(item?.["#text"]))
     .find(
       (url) => isAllowedArtworkUrl(url) && !url.includes(PLACEHOLDER_ARTWORK),
     );

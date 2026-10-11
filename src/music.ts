@@ -65,6 +65,18 @@ export function createNowPlayingEngine({
   now?: () => number;
   timeoutMs?: number;
 }): NowPlayingEngine {
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
+    throw new TypeError("createNowPlayingEngine needs a Last.fm apiKey");
+  }
+  if (typeof username !== "string" || !username.trim()) {
+    throw new TypeError("createNowPlayingEngine needs a Last.fm username");
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(
+      `timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`,
+    );
+  }
+
   const request = { apiKey, fetcher, timeoutMs };
   const deadlineMs = timeoutMs + DEADLINE_MARGIN_MS;
   // failures are kept too, so an outage or a rate limit isn't hit again by
