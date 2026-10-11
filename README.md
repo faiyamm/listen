@@ -126,4 +126,4 @@ Not using React? Poll your route with `fetch`; the response is the same JSON.
 
 [MIT](https://github.com/faiyamm/listen/blob/main/LICENSE) © [faiyamm](https://github.com/faiyamm)
 
-The MIT license covers the code. The `listen` name and logo aren't part of it.
+The MIT license covers the code. The `listen` name and logo aren't part of it, so please don't use them for your own project.
