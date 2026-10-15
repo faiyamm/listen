@@ -1,0 +1,10 @@
+node_modules
+coverage
+dist
+*.tgz
+*.tsbuildinfo
+.DS_Store
+npm-debug.log*
+.pnpm-debug.log*
+.env*
+!.env.example
