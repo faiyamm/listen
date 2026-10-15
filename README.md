@@ -6,6 +6,14 @@ Show what you're listening to on Last.fm, with any design. `listen` fetches your
 npm install @actkool/listen
 ```
 
+## Why this exists
+
+A music widget I came across on a portfolio gave me the idea for this project. It was connected to Spotify, but I use Apple Music, so I started looking for another way to get live listening data.
+
+Last.fm looked like the answer. The problem was that regular scrobbles could take too long to appear for something meant to feel live. After looking into how its now-playing state and timestamps behave, I used a little timing math and track-duration data to reduce the perceived delay.
+
+It started as a widget for my own portfolio. The engine behind it became this package, so anyone can connect their own Last.fm account and put their own design on top.
+
 ## Before you start: your scrobbler
 
 `listen` can only be as live as Last.fm. Last.fm knows what you're playing when your player sends it a "now playing" update, and not every scrobbler does that right away.
