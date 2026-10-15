@@ -8,6 +8,7 @@ import {
   type LastfmTrack,
   type Track,
 } from "./types.js";
+import { isWithinPlayback } from "./playback.js";
 import { lastfmTrackUrl } from "./urls.js";
 
 const RESPONSE_TTL_MS = 5_000;
@@ -38,18 +39,6 @@ function lookupKey(artist: string, name: string) {
 
 function trackId(artist: string, name: string) {
   return `${encodeURIComponent(artist)}/${encodeURIComponent(name)}`;
-}
-
-function isWithinPlayback(
-  scrobbledAt: number | null,
-  durationMs: number | null,
-  now: number,
-) {
-  return (
-    scrobbledAt !== null &&
-    durationMs !== null &&
-    now < scrobbledAt + durationMs
-  );
 }
 
 export function createNowPlayingEngine({

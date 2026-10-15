@@ -104,6 +104,8 @@ Pass `["itunes"]` to also match the song on the iTunes Search API. It adds highe
 
 It is opt-in, so a design that only needs the title and artist never waits on iTunes.
 
+Apple rate-limits the iTunes Search API per outgoing IP address. On a host whose outgoing address is shared with other customers, like Cloudflare Workers, that limit is always exhausted and the server's lookup comes back empty. The React hook notices and looks the song up from the visitor's browser instead; see below. On a host with its own address, like a VPS or a Node server, the server's lookup works as described.
+
 ## React
 
 `useNowPlaying` polls your route and renders nothing. It checks every five seconds while a song is playing and every ten seconds otherwise. It stops while the tab is hidden and checks right away when it comes back.
@@ -125,6 +127,8 @@ function NowPlaying() {
 ```
 
 `status` is `"loading"`, `"ready"`, or `"error"`. On an error, `track` keeps the last song it got, so you can keep showing it and fall back to an error message only when there is nothing to show. Pass `endpoint` if your route is not `/api/now-playing`.
+
+With the iTunes extra, when the server answers with an empty `itunes` object, the hook looks the song up from the browser with the same matching rules, once per song, and fills in the artwork, the preview, the Apple Music link and, if the server didn't know it, the length. The track shows first and the extras follow. The visitor's browser then talks to Apple directly; if you'd rather keep every request on your server, pass `browserFallback: false`.
 
 The hook is a client module, so in the Next.js App Router use it from a component marked `"use client"`.
 
