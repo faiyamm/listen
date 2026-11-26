@@ -1,6 +1,7 @@
 export {
   createNowPlayingEngine,
   parseExtras,
+  type EngineOptions,
   type GetTrackOptions,
   type NowPlayingEngine,
 } from "./music.js";

@@ -1,11 +1,12 @@
 import { createSharedCalls } from "./cache.js";
 import { findItunesMatch } from "./itunes.js";
 import { fetchLastfmDurationMs, fetchLastfmTrack } from "./lastfm.js";
+import { fetchListenbrainzTrack } from "./listenbrainz.js";
 import {
   EXTRAS,
   type Extra,
   type ItunesMatch,
-  type LastfmTrack,
+  type SourceTrack,
   type Track,
 } from "./types.js";
 import { isWithinPlayback } from "./playback.js";
@@ -41,24 +42,45 @@ function trackId(artist: string, name: string) {
   return `${encodeURIComponent(artist)}/${encodeURIComponent(name)}`;
 }
 
-export function createNowPlayingEngine({
-  apiKey,
-  username,
-  fetcher = fetch,
-  now = Date.now,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
-}: {
-  apiKey: string;
-  username: string;
+export type EngineOptions = (
+  | { service?: "lastfm"; apiKey: string; username: string }
+  | { service: "listenbrainz"; username: string }
+) & {
   fetcher?: typeof fetch;
   now?: () => number;
   timeoutMs?: number;
-}): NowPlayingEngine {
-  if (typeof apiKey !== "string" || !apiKey.trim()) {
+};
+
+export function createNowPlayingEngine(
+  options: EngineOptions,
+): NowPlayingEngine {
+  const {
+    username,
+    fetcher = fetch,
+    now = Date.now,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  } = options;
+  const service = options.service ?? "lastfm";
+  const serviceName = service === "listenbrainz" ? "ListenBrainz" : "Last.fm";
+  const apiKey = "apiKey" in options ? options.apiKey : "";
+
+  if (service !== "lastfm" && service !== "listenbrainz") {
+    throw new TypeError(
+      `service must be "lastfm" or "listenbrainz", got ${String(service)}`,
+    );
+  }
+  if (service === "lastfm" && (typeof apiKey !== "string" || !apiKey.trim())) {
     throw new TypeError("createNowPlayingEngine needs a Last.fm apiKey");
   }
-  if (typeof username !== "string" || !username.trim()) {
-    throw new TypeError("createNowPlayingEngine needs a Last.fm username");
+  // "." and ".." would turn the listenbrainz url into another endpoint
+  if (
+    typeof username !== "string" ||
+    !username.trim() ||
+    /^\.{1,2}$/.test(username.trim())
+  ) {
+    throw new TypeError(
+      `createNowPlayingEngine needs a ${serviceName} username`,
+    );
   }
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new RangeError(
@@ -70,7 +92,7 @@ export function createNowPlayingEngine({
   const deadlineMs = timeoutMs + DEADLINE_MARGIN_MS;
   // failures are kept too, so an outage or a rate limit isn't hit again by
   // every poll from every visitor
-  const recentTracks = createSharedCalls<LastfmTrack | null>({
+  const recentTracks = createSharedCalls<SourceTrack | null>({
     ttlMs: RESPONSE_TTL_MS,
     failureTtlMs: RESPONSE_TTL_MS,
     deadlineMs,
@@ -89,10 +111,18 @@ export function createNowPlayingEngine({
     now,
   });
 
-  function getDurationMs(artist: string, name: string) {
+  function getDurationMs(track: SourceTrack) {
+    if (service === "listenbrainz") return track.durationMs ?? null;
+    const { artist, name } = track;
     return durations(lookupKey(artist, name), () =>
       fetchLastfmDurationMs({ ...request, artist, name }),
     ).catch(() => null);
+  }
+
+  function fetchRecentTrack() {
+    return service === "listenbrainz"
+      ? fetchListenbrainzTrack({ username, fetcher, timeoutMs })
+      : fetchLastfmTrack({ ...request, username });
   }
 
   function getItunesMatch(artist: string, name: string) {
@@ -103,26 +133,27 @@ export function createNowPlayingEngine({
 
   return {
     async getTrack({ extras = [] } = {}) {
-      const lastfm = await recentTracks("recent", () =>
-        fetchLastfmTrack({ ...request, username }),
-      );
-      if (!lastfm) return null;
+      const recent = await recentTracks("recent", fetchRecentTrack);
+      if (!recent) return null;
 
       const wantsItunes = extras.includes("itunes");
-      const [lastfmDurationMs, itunes] = await Promise.all([
-        getDurationMs(lastfm.artist, lastfm.name),
-        wantsItunes ? getItunesMatch(lastfm.artist, lastfm.name) : null,
+      const [sourceDurationMs, itunes] = await Promise.all([
+        getDurationMs(recent),
+        wantsItunes ? getItunesMatch(recent.artist, recent.name) : null,
       ]);
-      const durationMs = lastfmDurationMs ?? itunes?.durationMs ?? null;
+      const durationMs = sourceDurationMs ?? itunes?.durationMs ?? null;
 
       return {
-        id: trackId(lastfm.artist, lastfm.name),
-        ...lastfm,
-        lastfmUrl: lastfmTrackUrl(lastfm.artist, lastfm.name),
+        id: trackId(recent.artist, recent.name),
+        name: recent.name,
+        artist: recent.artist,
+        albumArtUrl: recent.albumArtUrl,
+        scrobbledAt: recent.scrobbledAt,
+        lastfmUrl: lastfmTrackUrl(recent.artist, recent.name),
         durationMs,
         nowPlaying:
-          lastfm.nowPlaying ||
-          isWithinPlayback(lastfm.scrobbledAt, durationMs, now()),
+          recent.nowPlaying ||
+          isWithinPlayback(recent.scrobbledAt, durationMs, now()),
         ...(wantsItunes && {
           itunes: {
             artworkUrl: itunes?.artworkUrl ?? null,

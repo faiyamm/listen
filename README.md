@@ -1,6 +1,6 @@
 # @actkool/listen
 
-Show what you're listening to on Last.fm, with any design. `listen` fetches your latest track on the server, works out whether it is still playing, and hands your UI one clean JSON shape. It draws nothing, so the look is yours.
+Show what you're listening to on ListenBrainz or Last.fm, with any design. `listen` fetches your latest track on the server, works out whether it is still playing, and hands your UI one clean JSON shape. It draws nothing, so the look is yours.
 
 ```bash
 npm install @actkool/listen
@@ -14,26 +14,30 @@ Last.fm looked like the answer. The problem was that regular scrobbles could tak
 
 It started as a widget for my own portfolio. The engine behind it became this package, so anyone can connect their own Last.fm account and put their own design on top.
 
-## Before you start: your scrobbler
+## Before you start: pick a service
 
-`listen` can only be as live as Last.fm. Last.fm knows what you're playing when your player sends it a "now playing" update, and not every scrobbler does that right away.
+From December 1, 2026, a Last.fm API key only works while its account pays for Last.fm Pro. [ListenBrainz](https://listenbrainz.org) is free, open, and needs no key, so it is the one to pick unless you already pay for Pro. Without `service`, the engine uses Last.fm, as before. Last.fm still works if you have Pro.
 
-- **Spotify** sends it on its own once you connect your account to Last.fm.
-- **Apple Music** needs a separate scrobbler. [FastScrobbler](https://github.com/kevinlim512/FastScrobbler) is open source and sends "now playing" as soon as a song starts. On Mac it is reliable. On iPhone it works best-effort, because iOS can suspend apps in the background.
+## Your scrobbler
+
+`listen` can only be as live as the service behind it. It knows what you're playing when your player sends a "now playing" update, and not every scrobbler does that right away.
+
+- **Apple Music** needs a separate scrobbler. [FastScrobbler](https://github.com/kevinlim512/FastScrobbler) is open source, sends to ListenBrainz and Last.fm, and sends "now playing" as soon as a song starts. On Mac it is reliable. On iPhone it works best-effort, because iOS can suspend apps in the background.
+- **Spotify** sends "now playing" to Last.fm on its own once you connect your account.
 
 Without a scrobbler like these, `listen` still works, but it shows the last song you played instead of the current one.
 
 ## Server
 
-Create one engine and call it from any server route. It needs a [Last.fm API key](https://www.last.fm/api/account/create) and your username, and it keeps the key on the server.
+Create one engine and call it from any server route. With ListenBrainz it only needs your username:
 
 ```ts
 // app/api/now-playing/route.ts
 import { createNowPlayingEngine, parseExtras } from "@actkool/listen";
 
 const engine = createNowPlayingEngine({
-  apiKey: process.env.LASTFM_API_KEY!,
-  username: process.env.LASTFM_USERNAME!,
+  service: "listenbrainz",
+  username: process.env.LISTENBRAINZ_USERNAME!,
 });
 
 export async function GET(request: Request) {
@@ -46,19 +50,29 @@ export async function GET(request: Request) {
 }
 ```
 
-Create the engine once, outside the handler, so its caches survive between requests. Your latest track is cached for five seconds, counted from when Last.fm answers, and requests that arrive together share one call to Last.fm. Song lookups are cached for a day, so polling stays cheap. A lookup that fails is retried after a minute, so a rate limit isn't hit again by every request.
+With Last.fm, leave out `service` and pass a [Last.fm API key](https://www.last.fm/api/account/create) from an account with Pro. The key stays on the server:
 
-`getTrack()` throws when Last.fm can't be reached, answers with an error, or doesn't answer within five seconds. Answer with an error status, as above, so your UI can tell "Last.fm is down" apart from "nothing scrobbled yet". A failure is reused for the same five seconds, so a Last.fm outage doesn't turn every poll into a new request.
+```ts
+const engine = createNowPlayingEngine({
+  apiKey: process.env.LASTFM_API_KEY!,
+  username: process.env.LASTFM_USERNAME!,
+});
+```
 
-The song length and the iTunes extra are looked up after that, each with its own five seconds. If one of them fails or runs out of time, its fields are `null` and the track still comes back, so a call can take up to about ten seconds. Pass `timeoutMs` to `createNowPlayingEngine` to change the limit for every request.
+Create the engine once, outside the handler, so its caches survive between requests. Your latest track is cached for five seconds, counted from when the service answers, and requests that arrive together share one call. Song lookups (the Last.fm length and the iTunes extra) are cached for a day, so polling stays cheap. A lookup that fails is retried after a minute, so a rate limit isn't hit again by every request.
+
+`getTrack()` throws when the service can't be reached, answers with an error, or doesn't answer within five seconds. Answer with an error status, as above, so your UI can tell "the service is down" apart from "nothing scrobbled yet". A failure is reused for the same five seconds, so an outage doesn't turn every poll into a new request.
+
+With Last.fm, the song length and the iTunes extra are looked up after that, each with its own five seconds. With ListenBrainz the length comes with the scrobble, so only the iTunes extra is looked up. If one of them fails or runs out of time, its fields are `null` and the track still comes back, so a call can take up to about ten seconds. Pass `timeoutMs` to `createNowPlayingEngine` to change the limit for every request.
 
 ### Options
 
 | Option      | Default    |                                                                                                                                                                      |
 | ----------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apiKey`    | required   | Your Last.fm API key.                                                                                                                                                |
-| `username`  | required   | The Last.fm account to show.                                                                                                                                         |
-| `timeoutMs` | `5000`     | How long each request to Last.fm or iTunes may take.                                                                                                                 |
+| `service`   | `"lastfm"` | `"listenbrainz"` or `"lastfm"`.                                                                                                                                      |
+| `username`  | required   | The account to show.                                                                                                                                                 |
+| `apiKey`    | Last.fm    | Your Last.fm API key. Only for Last.fm.                                                                                                                              |
+| `timeoutMs` | `5000`     | How long each request to the service or iTunes may take.                                                                                                             |
 | `fetcher`   | `fetch`    | A `fetch`-compatible function, for a proxy or for tests. It should honour the `signal` it gets; if it doesn't, the engine still gives up a second after `timeoutMs`. |
 | `now`       | `Date.now` | The clock used to work out whether a song is still playing. Mostly useful in tests.                                                                                  |
 
@@ -82,10 +96,11 @@ It runs anywhere with `fetch`: Node 20.19 or newer, Cloudflare Workers, Bun, Den
 ```
 
 - `id` is the artist and the title, each URL-encoded and joined by `/`, so it is safe as a React key or a DOM id. Pass it through `CSS.escape()` before using it in a selector.
-- `nowPlaying` is already resolved. It is true while Last.fm reports the track as playing, or while a scrobbled track is still within its length, which covers the gap before some scrobblers catch up.
-- `scrobbledAt` is when the track started, in milliseconds, so you can show "played 3h ago". It is `null` while Last.fm reports the track as playing; when `nowPlaying` comes from the track length instead, it keeps its value.
-- `durationMs` is `null` when no source knows the length. When Last.fm doesn't have it, the iTunes length is used, but only with the iTunes extra, so `durationMs` and the estimated `nowPlaying` can differ with and without it.
-- `albumArtUrl` is often `null`: Last.fm is missing artwork for many songs, and its grey placeholder star is left out. The iTunes extra below fills that gap.
+- `nowPlaying` is already resolved. It is true while the service reports the track as playing, or while a scrobbled track is still within its length, which covers the gap before some scrobblers catch up.
+- `scrobbledAt` is when the track started, in milliseconds, so you can show "played 3h ago". It is `null` while the service reports the track as playing; when `nowPlaying` comes from the track length instead, it keeps its value.
+- `durationMs` is `null` when no source knows the length. With ListenBrainz it is the length your scrobbler sent. When the service doesn't have it, the iTunes length is used, but only with the iTunes extra, so `durationMs` and the estimated `nowPlaying` can differ with and without it.
+- `albumArtUrl` is often `null`. With ListenBrainz it comes from the [Cover Art Archive](https://coverartarchive.org), which redirects to `archive.org`, once ListenBrainz has matched the song to a release. Last.fm is missing artwork for many songs, and its grey placeholder star is left out. The iTunes extra below fills that gap.
+- `lastfmUrl` is the song's public page on Last.fm, with either service. It needs no account.
 
 ### iTunes extra
 
