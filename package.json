@@ -1,7 +1,7 @@
 {
   "name": "@actkool/listen",
-  "version": "0.2.0",
-  "description": "Show what you are listening to on Last.fm, with any design.",
+  "version": "0.3.0",
+  "description": "Show what you are listening to on ListenBrainz or Last.fm, with any design.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,6 +13,7 @@
   },
   "keywords": [
     "lastfm",
+    "listenbrainz",
     "now-playing",
     "scrobble",
     "react"

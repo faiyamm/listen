@@ -20,10 +20,10 @@ export type Track = {
   itunes?: ItunesExtras;
 };
 
-export type LastfmTrack = Pick<
+export type SourceTrack = Pick<
   Track,
   "name" | "artist" | "albumArtUrl" | "nowPlaying" | "scrobbledAt"
->;
+> & { durationMs?: number | null };
 
 export type ItunesMatch = ItunesExtras & { durationMs: number | null };
 

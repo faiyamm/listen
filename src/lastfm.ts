@@ -1,4 +1,4 @@
-import type { LastfmTrack } from "./types.js";
+import type { SourceTrack } from "./types.js";
 import { isAllowedArtworkUrl } from "./urls.js";
 
 type LastfmError = { error?: number; message?: string };
@@ -88,7 +88,7 @@ export async function fetchLastfmDurationMs({
 export async function fetchLastfmTrack({
   username,
   ...request
-}: Request & { username: string }): Promise<LastfmTrack | null> {
+}: Request & { username: string }): Promise<SourceTrack | null> {
   const { ok, status, data } = await callLastfm<LastfmResponse>(request, {
     method: "user.getrecenttracks",
     user: username,
